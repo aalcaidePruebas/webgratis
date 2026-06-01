@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const viewport: Viewport = {
-  themeColor: "#2f5c47",
+  themeColor: "#4f46e5",
 };
 
 export const metadata: Metadata = {
@@ -43,7 +43,7 @@ export default function RootLayout({
         lang="es"
         className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
       >
-        <body className="min-h-full flex flex-col bg-[#f8faf9] text-[#1e293b]">
+        <body className="min-h-full flex flex-col bg-[#faf9fe] text-slate-800">
           {children}
           <script
             dangerouslySetInnerHTML={{
