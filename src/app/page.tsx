@@ -1,65 +1,622 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import React, { useState, useEffect } from "react";
+import Image from "next/image";
+import Link from "next/link";
+import { 
+  Calendar as CalendarIcon, 
+  Clock, 
+  User, 
+  Phone, 
+  Mail, 
+  CheckCircle, 
+  ArrowRight, 
+  ShieldCheck, 
+  Heart, 
+  Sparkles,
+  ArrowLeft,
+  Smartphone,
+  Check,
+  AlertCircle
+} from "lucide-react";
+import confetti from "canvas-confetti";
+import { 
+  getActiveTherapist, 
+  getServices, 
+  getAvailableSlots, 
+  createAppointment 
+} from "./actions";
+
+interface Therapist {
+  id: number;
+  name: string;
+  specialty: string;
+  bio: string;
+  avatar: string;
+}
+
+interface Service {
+  id: number;
+  name: string;
+  description: string;
+  duration: number;
+  price: string | number;
+}
+
+export default function LandingPage() {
+  // Datos dinámicos cargados del servidor
+  const [therapist, setTherapist] = useState<Therapist | null>({
+    id: 1,
+    name: "Dra. Sofía Alcaide",
+    specialty: "Psicóloga Clínica y Terapeuta Cognitivo-Conductual",
+    bio: "Especialista en ansiedad, depresión, superación de duelos y crecimiento personal. Más de 10 años acompañando a personas en su camino hacia el bienestar mental con un enfoque cálido, empático y profesional.",
+    avatar: "/therapist.png"
+  });
+  const [services, setServices] = useState<Service[]>([
+    {
+      id: 1,
+      name: "Terapia Individual Estándar",
+      description: "Sesión individual de psicoterapia orientada a adolescentes y adultos. Tratamiento de ansiedad, depresión, estrés laboral y apoyo emocional.",
+      duration: 60,
+      price: 60
+    }
+  ]);
+
+  // Estado del Wizard de Reserva
+  const [step, setStep] = useState(1);
+  const [selectedService, setSelectedService] = useState<Service | null>(null);
+  const [selectedDate, setSelectedDate] = useState("");
+  const [availableSlots, setAvailableSlots] = useState<string[]>([]);
+  const [selectedSlot, setSelectedSlot] = useState("");
+  const [loadingSlots, setLoadingSlots] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  // Formulario del Paciente
+  const [formData, setFormData] = useState({
+    patient_name: "",
+    patient_email: "",
+    patient_phone: "",
+    patient_age: "",
+    reason: ""
+  });
+  const [errorMsg, setErrorMsg] = useState("");
+
+  // Cargar datos al montar
+  useEffect(() => {
+    async function loadData() {
+      const activeTher = await getActiveTherapist();
+      if (activeTher) setTherapist(activeTher);
+
+      const servList = await getServices();
+      if (servList && servList.length > 0) {
+        setServices(servList as any);
+        setSelectedService(servList[0] as any);
+      } else {
+        setSelectedService(services[0]);
+      }
+    }
+    loadData();
+
+    // Establecer fecha de mañana por defecto en el widget
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowStr = tomorrow.toISOString().split("T")[0];
+    setSelectedDate(tomorrowStr);
+  }, []);
+
+  // Recargar slots cuando cambia la fecha
+  useEffect(() => {
+    if (selectedDate && therapist) {
+      setLoadingSlots(true);
+      setSelectedSlot("");
+      getAvailableSlots(selectedDate, therapist.id)
+        .then((slots) => {
+          setAvailableSlots(slots);
+          setLoadingSlots(false);
+        })
+        .catch(() => {
+          setAvailableSlots([]);
+          setLoadingSlots(false);
+        });
+    }
+  }, [selectedDate, therapist]);
+
+  // Obtener fecha mínima para reservar (hoy)
+  const getTodayStr = () => {
+    return new Date().toISOString().split("T")[0];
+  };
+
+  // Manejo de inputs del formulario
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const { name, value } = e.target;
+    setFormData((prev) => ({ ...prev, [name]: value }));
+  };
+
+  // Continuar al paso 2
+  const handleGoToDetails = () => {
+    if (!selectedService) {
+      setErrorMsg("Por favor, selecciona un servicio.");
+      return;
+    }
+    if (!selectedDate) {
+      setErrorMsg("Por favor, selecciona una fecha.");
+      return;
+    }
+    if (!selectedSlot) {
+      setErrorMsg("Por favor, selecciona una hora para tu cita.");
+      return;
+    }
+    setErrorMsg("");
+    setStep(2);
+  };
+
+  // Enviar reserva a Neon DB
+  const handleBookingSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formData.patient_name || !formData.patient_email || !formData.patient_phone) {
+      setErrorMsg("Por favor, rellena los campos obligatorios (*).");
+      return;
+    }
+
+    setSubmitting(true);
+    setErrorMsg("");
+
+    try {
+      const response = await createAppointment({
+        patient_name: formData.patient_name,
+        patient_email: formData.patient_email,
+        patient_phone: formData.patient_phone,
+        patient_age: formData.patient_age ? parseInt(formData.patient_age, 10) : 0,
+        reason: formData.reason,
+        date: selectedDate,
+        time_slot: selectedSlot,
+        therapist_id: therapist?.id || 1,
+        service_id: selectedService?.id || 1
+      });
+
+      if (response.success) {
+        setStep(3);
+        // Explotar confeti de celebración al agendar
+        confetti({
+          particleCount: 150,
+          spread: 80,
+          origin: { y: 0.6 }
+        });
+      } else {
+        setErrorMsg(response.message || "Error al realizar la reserva.");
+      }
+    } catch (err) {
+      console.error(err);
+      setErrorMsg("Ocurrió un error inesperado al procesar la reserva.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // Reiniciar formulario
+  const handleReset = () => {
+    setFormData({
+      patient_name: "",
+      patient_email: "",
+      patient_phone: "",
+      patient_age: "",
+      reason: ""
+    });
+    setSelectedSlot("");
+    setStep(1);
+  };
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+    <div className="flex flex-col min-h-screen">
+      {/* Header Premium */}
+      <header className="sticky top-0 z-50 backdrop-blur-md bg-[#f8faf9]/80 border-b border-emerald-100/50 px-4 sm:px-6 lg:px-8 py-4">
+        <div className="max-w-6xl mx-auto flex items-center justify-between">
+          <Link href="/" className="flex items-center space-x-2">
+            <div className="w-10 h-10 bg-emerald-600 rounded-xl flex items-center justify-center text-white shadow-md shadow-emerald-700/10">
+              <Sparkles className="w-5 h-5 text-emerald-100" />
+            </div>
+            <div>
+              <span className="text-xl font-bold tracking-tight text-[#112211]">Mente<span className="text-emerald-700">Sana</span></span>
+              <p className="text-[10px] uppercase tracking-wider text-emerald-800 font-semibold leading-none">Psicología</p>
+            </div>
+          </Link>
+          
+          <Link 
+            href="/admin" 
+            className="text-xs font-semibold text-emerald-950 bg-emerald-50 border border-emerald-200/60 px-4 py-2 rounded-xl hover:bg-emerald-100/70 active:scale-95 transition-all duration-200"
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+            Área Profesional
+          </Link>
         </div>
+      </header>
+
+      {/* Main Content */}
+      <main className="flex-grow">
+        {/* Hero Section */}
+        <section className="bg-gradient-to-b from-[#eef4f1] to-transparent py-12 px-4 sm:px-6 lg:px-8">
+          <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+            
+            {/* Texto Promocional */}
+            <div className="lg:col-span-6 space-y-6 text-center lg:text-left">
+              <span className="inline-flex items-center space-x-2 bg-emerald-100/80 border border-emerald-200 text-emerald-900 text-xs px-3.5 py-1.5 rounded-full font-semibold">
+                <Heart className="w-3.5 h-3.5 text-emerald-700 fill-emerald-700" />
+                <span>Salud Mental & Bienestar Emocional</span>
+              </span>
+              
+              <h1 className="text-4xl sm:text-5xl font-black text-slate-900 tracking-tight leading-none">
+                Encuentra tu espacio de paz mental
+              </h1>
+              
+              <p className="text-base text-slate-600 leading-relaxed max-w-lg mx-auto lg:mx-0">
+                Reserva una sesión con nuestra clínica y comienza tu camino de crecimiento y sanación emocional. Sesiones personalizadas de 60 minutos con psicólogos titulados.
+              </p>
+
+              {/* Perfil del Terapeuta */}
+              {therapist && (
+                <div className="bg-white/80 backdrop-blur-sm border border-emerald-100/50 p-4 rounded-2xl flex flex-col sm:flex-row items-center sm:items-start text-left gap-4 max-w-md mx-auto lg:mx-0 shadow-sm">
+                  <div className="relative w-16 h-16 rounded-xl overflow-hidden bg-slate-100 shrink-0 border border-emerald-100">
+                    <Image
+                      src={therapist.avatar}
+                      alt={therapist.name}
+                      fill
+                      className="object-cover"
+                    />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-slate-900">{therapist.name}</h3>
+                    <p className="text-xs text-emerald-800 font-semibold mb-1.5">{therapist.specialty}</p>
+                    <p className="text-xs text-slate-500 line-clamp-2 leading-relaxed">{therapist.bio}</p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* WIDGET DE RESERVA INTERACTIVO (TÁCTIL / RESPONSIVE) */}
+            <div className="lg:col-span-6">
+              <div id="booking-widget" className="bg-white border border-emerald-100/60 rounded-3xl p-6 sm:p-8 shadow-xl shadow-emerald-950/5 relative overflow-hidden transition-all duration-300">
+                
+                {/* Indicador de Pasos */}
+                <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-6">
+                  <div>
+                    <span className="text-xs font-bold uppercase tracking-wider text-emerald-800">Reserva de Cita</span>
+                    <h2 className="text-lg font-extrabold text-slate-900">
+                      {step === 1 && "1. Elige Fecha y Hora"}
+                      {step === 2 && "2. Rellena tus Datos"}
+                      {step === 3 && "¡Cita Reservada!"}
+                    </h2>
+                  </div>
+                  <div className="flex space-x-1">
+                    <div className={`w-6 h-1.5 rounded-full transition-all duration-300 ${step >= 1 ? "bg-emerald-600" : "bg-slate-200"}`} />
+                    <div className={`w-6 h-1.5 rounded-full transition-all duration-300 ${step >= 2 ? "bg-emerald-600" : "bg-slate-200"}`} />
+                    <div className={`w-6 h-1.5 rounded-full transition-all duration-300 ${step === 3 ? "bg-emerald-600" : "bg-slate-200"}`} />
+                  </div>
+                </div>
+
+                {/* PASO 1: SELECCIONAR SERVICIO, FECHA Y HORA */}
+                {step === 1 && (
+                  <div className="space-y-5 animate-fadeIn">
+                    {/* Selección de Servicio */}
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Servicio Requerido</label>
+                      <div className="grid grid-cols-1 gap-3">
+                        {services.map((serv) => (
+                          <div 
+                            key={serv.id}
+                            onClick={() => setSelectedService(serv)}
+                            className={`p-4 rounded-2xl border-2 cursor-pointer transition-all duration-200 relative ${
+                              selectedService?.id === serv.id 
+                                ? "border-emerald-600 bg-emerald-50/40" 
+                                : "border-slate-100 hover:border-emerald-100 bg-slate-50/30"
+                            }`}
+                          >
+                            <div className="flex justify-between items-start">
+                              <div>
+                                <h4 className="font-bold text-sm text-slate-900">{serv.name}</h4>
+                                <p className="text-xs text-slate-500 mt-0.5">{serv.duration} minutos</p>
+                              </div>
+                              <span className="text-sm font-extrabold text-emerald-700 font-mono">{serv.price}€</span>
+                            </div>
+                            {selectedService?.id === serv.id && (
+                              <div className="absolute bottom-3 right-3 w-5 h-5 bg-emerald-600 rounded-full flex items-center justify-center text-white">
+                                <Check className="w-3.5 h-3.5 stroke-[3]" />
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Selector de Fecha */}
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Selecciona un Día</label>
+                      <div className="relative">
+                        <input
+                          type="date"
+                          min={getTodayStr()}
+                          value={selectedDate}
+                          onChange={(e) => setSelectedDate(e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm text-slate-800 font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all appearance-none"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Selector de Horas Disponibles */}
+                    <div>
+                      <div className="flex justify-between items-center mb-2">
+                        <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">Horas Disponibles</label>
+                        <span className="text-[10px] text-emerald-800 font-semibold">Pago presencial</span>
+                      </div>
+                      
+                      {loadingSlots ? (
+                        <div className="flex flex-col items-center justify-center py-6 space-y-2">
+                          <div className="w-6 h-6 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin" />
+                          <span className="text-xs text-slate-400">Buscando horas libres...</span>
+                        </div>
+                      ) : availableSlots.length > 0 ? (
+                        <div className="grid grid-cols-3 gap-2 max-h-48 overflow-y-auto pr-1">
+                          {availableSlots.map((slot) => (
+                            <button
+                              type="button"
+                              key={slot}
+                              onClick={() => setSelectedSlot(slot)}
+                              className={`py-3 px-2 rounded-xl text-xs font-bold font-mono transition-all duration-200 active:scale-95 ${
+                                selectedSlot === slot
+                                  ? "bg-emerald-600 text-white shadow-md shadow-emerald-700/10"
+                                  : "bg-slate-50 hover:bg-emerald-50/50 border border-slate-100 text-slate-700 hover:text-emerald-950"
+                              }`}
+                            >
+                              {slot}
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="flex flex-col items-center justify-center py-6 px-4 bg-slate-50/50 border border-dashed border-slate-200 rounded-2xl text-center">
+                          <AlertCircle className="w-6 h-6 text-slate-400 mb-1.5" />
+                          <span className="text-xs font-semibold text-slate-500">No hay turnos disponibles para esta fecha.</span>
+                          <span className="text-[10px] text-slate-400 mt-0.5">Por favor, prueba con otro día laborable.</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {errorMsg && (
+                      <p className="text-xs text-rose-600 font-semibold bg-rose-50 border border-rose-100 px-3.5 py-2.5 rounded-xl flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4 shrink-0" />
+                        <span>{errorMsg}</span>
+                      </p>
+                    )}
+
+                    {/* Botón Siguiente */}
+                    <button
+                      type="button"
+                      onClick={handleGoToDetails}
+                      disabled={!selectedSlot}
+                      className="w-full bg-emerald-700 text-white font-bold text-sm py-4 px-6 rounded-2xl flex items-center justify-center space-x-2 shadow-lg shadow-emerald-900/10 hover:bg-emerald-800 disabled:opacity-50 disabled:pointer-events-none active:scale-95 transition-all duration-200 mt-2"
+                    >
+                      <span>Continuar</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
+
+                {/* PASO 2: FORMULARIO DE DATOS DEL PACIENTE */}
+                {step === 2 && (
+                  <form onSubmit={handleBookingSubmit} className="space-y-4 animate-fadeIn">
+                    <button 
+                      type="button"
+                      onClick={() => setStep(1)}
+                      className="inline-flex items-center space-x-1.5 text-xs font-bold text-slate-500 hover:text-emerald-800 transition-colors"
+                    >
+                      <ArrowLeft className="w-3.5 h-3.5" />
+                      <span>Volver a fecha y hora</span>
+                    </button>
+
+                    {/* Resumen del Turno */}
+                    <div className="bg-emerald-50/50 border border-emerald-100/50 p-3.5 rounded-2xl text-xs space-y-1 text-emerald-950 font-semibold">
+                      <p>✨ <span className="font-extrabold text-slate-800">Servicio:</span> {selectedService?.name}</p>
+                      <p>📅 <span className="font-extrabold text-slate-800">Fecha:</span> {selectedDate.split("-").reverse().join("/")}</p>
+                      <p>⏰ <span className="font-extrabold text-slate-800">Hora:</span> {selectedSlot} hs ({selectedService?.duration} min)</p>
+                      <p>💰 <span className="font-extrabold text-slate-800">Coste:</span> {selectedService?.price}€ (Pago presencial en consulta)</p>
+                    </div>
+
+                    {/* Campo Nombre */}
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">Nombre Completo *</label>
+                      <div className="relative">
+                        <span className="absolute left-4 top-3.5 text-slate-400"><User className="w-4 h-4" /></span>
+                        <input
+                          type="text"
+                          name="patient_name"
+                          required
+                          placeholder="Tu nombre y apellidos"
+                          value={formData.patient_name}
+                          onChange={handleInputChange}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-2xl pl-11 pr-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Fila Email y Teléfono */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">Email *</label>
+                        <div className="relative">
+                          <span className="absolute left-4 top-3.5 text-slate-400"><Mail className="w-4 h-4" /></span>
+                          <input
+                            type="email"
+                            name="patient_email"
+                            required
+                            placeholder="ejemplo@correo.com"
+                            value={formData.patient_email}
+                            onChange={handleInputChange}
+                            className="w-full bg-slate-50 border border-slate-200 rounded-2xl pl-11 pr-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">Teléfono *</label>
+                        <div className="relative">
+                          <span className="absolute left-4 top-3.5 text-slate-400"><Phone className="w-4 h-4" /></span>
+                          <input
+                            type="tel"
+                            name="patient_phone"
+                            required
+                            placeholder="600 000 000"
+                            value={formData.patient_phone}
+                            onChange={handleInputChange}
+                            className="w-full bg-slate-50 border border-slate-200 rounded-2xl pl-11 pr-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Fila Edad */}
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">Edad (Opcional)</label>
+                      <input
+                        type="number"
+                        name="patient_age"
+                        placeholder="Ej: 30"
+                        value={formData.patient_age}
+                        onChange={handleInputChange}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                      />
+                    </div>
+
+                    {/* Campo Motivo */}
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">¿Cuál es el motivo de tu consulta? (Opcional)</label>
+                      <textarea
+                        name="reason"
+                        rows={2}
+                        placeholder="Breve descripción para ayudar a preparar tu sesión..."
+                        value={formData.reason}
+                        onChange={handleInputChange}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all resize-none"
+                      />
+                    </div>
+
+                    {errorMsg && (
+                      <p className="text-xs text-rose-600 font-semibold bg-rose-50 border border-rose-100 px-3.5 py-2.5 rounded-xl flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4 shrink-0" />
+                        <span>{errorMsg}</span>
+                      </p>
+                    )}
+
+                    {/* Botones Enviar */}
+                    <button
+                      type="submit"
+                      disabled={submitting}
+                      className="w-full bg-emerald-700 text-white font-bold text-sm py-4 px-6 rounded-2xl flex items-center justify-center space-x-2 shadow-lg shadow-emerald-900/10 hover:bg-emerald-800 disabled:opacity-50 disabled:pointer-events-none active:scale-95 transition-all duration-200"
+                    >
+                      {submitting ? (
+                        <>
+                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          <span>Guardando Cita...</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>Confirmar Cita</span>
+                          <CheckCircle className="w-4 h-4" />
+                        </>
+                      )}
+                    </button>
+                  </form>
+                )}
+
+                {/* PASO 3: CONFIRMACIÓN EXITOSA */}
+                {step === 3 && (
+                  <div className="text-center py-6 space-y-5 animate-fadeIn">
+                    <div className="w-16 h-16 bg-emerald-100 text-emerald-700 rounded-full flex items-center justify-center mx-auto shadow-sm shadow-emerald-600/10">
+                      <Check className="w-8 h-8 stroke-[3]" />
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <h3 className="text-xl font-extrabold text-slate-900">¡Tu cita ha sido solicitada!</h3>
+                      <p className="text-xs text-slate-500 max-w-sm mx-auto leading-relaxed">
+                        Te hemos enviado un correo de confirmación. Tu cita queda registrada como **pendiente de confirmación** en nuestra agenda.
+                      </p>
+                    </div>
+
+                    {/* Tarjeta de Resumen */}
+                    <div className="bg-emerald-50/40 border border-emerald-100/50 p-5 rounded-2xl text-left text-xs max-w-sm mx-auto space-y-2 font-semibold text-slate-800">
+                      <p>✨ <span className="text-slate-500 font-bold uppercase tracking-wider text-[9px] mr-1.5">Paciente:</span> {formData.patient_name}</p>
+                      <p>📅 <span className="text-slate-500 font-bold uppercase tracking-wider text-[9px] mr-1.5">Fecha:</span> {selectedDate.split("-").reverse().join("/")}</p>
+                      <p>⏰ <span className="text-slate-500 font-bold uppercase tracking-wider text-[9px] mr-1.5">Hora:</span> {selectedSlot} hs</p>
+                      <p>💰 <span className="text-slate-500 font-bold uppercase tracking-wider text-[9px] mr-1.5">Precio:</span> {selectedService?.price}€ (Pago presencial en consulta)</p>
+                    </div>
+
+                    <div className="pt-2">
+                      <button
+                        type="button"
+                        onClick={handleReset}
+                        className="text-xs font-bold text-emerald-800 hover:text-emerald-950 hover:underline"
+                      >
+                        Reservar otra cita
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+          </div>
+        </section>
+
+        {/* Sección de Beneficios / Servicios */}
+        <section className="py-16 bg-[#f0f5f2]/40 px-4 sm:px-6 lg:px-8 border-y border-emerald-100/30">
+          <div className="max-w-6xl mx-auto space-y-10">
+            <div className="text-center space-y-2">
+              <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">Servicio Profesional Garantizado</h2>
+              <p className="text-sm text-slate-500 max-w-lg mx-auto">
+                Trabajamos bajo los estándares éticos y clínicos más rigurosos para ofrecerte un apoyo psicológico de alta calidad.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="bg-white border border-emerald-100/30 p-6 rounded-2xl shadow-sm text-center md:text-left space-y-3">
+                <div className="w-10 h-10 bg-emerald-50 text-emerald-700 rounded-xl flex items-center justify-center font-bold">1</div>
+                <h3 className="font-bold text-slate-900">Total Confidencialidad</h3>
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  Tus datos e información clínica están totalmente protegidos de acuerdo con la legislación vigente de protección de datos (RGPD).
+                </p>
+              </div>
+
+              <div className="bg-white border border-emerald-100/30 p-6 rounded-2xl shadow-sm text-center md:text-left space-y-3">
+                <div className="w-10 h-10 bg-emerald-50 text-emerald-700 rounded-xl flex items-center justify-center font-bold">2</div>
+                <h3 className="font-bold text-slate-900">Atención Personalizada</h3>
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  Adaptamos nuestras terapias a tus necesidades personales, ritmos y circunstancias únicas, brindando un trato sumamente empático.
+                </p>
+              </div>
+
+              <div className="bg-white border border-emerald-100/30 p-6 rounded-2xl shadow-sm text-center md:text-left space-y-3">
+                <div className="w-10 h-10 bg-emerald-50 text-emerald-700 rounded-xl flex items-center justify-center font-bold">3</div>
+                <h3 className="font-bold text-slate-900">Máxima Comodidad</h3>
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  Reserva tu cita en cualquier momento y desde cualquier dispositivo gracias a nuestra plataforma web optimizada para móviles.
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
       </main>
+
+      {/* Footer */}
+      <footer className="bg-slate-900 text-slate-400 py-10 px-4 sm:px-6 lg:px-8 border-t border-slate-800 text-xs">
+        <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-6">
+          <div className="text-center sm:text-left space-y-1.5">
+            <span className="text-sm font-bold text-white tracking-tight">MenteSana</span>
+            <p className="text-[10px] text-slate-500">© 2026 Mente Sana Clínica de Psicología. Todos los derechos reservados.</p>
+          </div>
+          
+          <div className="flex space-x-6">
+            <Link href="/" className="hover:text-white transition-colors">Aviso Legal</Link>
+            <Link href="/" className="hover:text-white transition-colors">Política de Privacidad</Link>
+            <Link href="/admin" className="text-emerald-400 font-bold hover:text-emerald-300 transition-colors">Acceso Psicólogo</Link>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }
